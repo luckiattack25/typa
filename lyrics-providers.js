@@ -41,22 +41,32 @@
       .trim();
   }
 
-  /** How well two (artist, title) pairs match, 0 (no match) to 1 (perfect). */
+  /**
+   * Score how well a candidate (artist, title) matches the query, as two
+   * independent components. A high title score can't compensate for a
+   * wrong artist, and vice versa — both must clear MIN_COMPONENT on their
+   * own for the candidate to be considered a real match at all.
+   */
+  const MIN_COMPONENT = 0.3;
+
+  function componentScore(query, candidate) {
+    const q = normalize(query);
+    const c = normalize(candidate);
+    if (!q || !c) return 0;
+    if (c === q) return 1;
+    if (c.includes(q) || q.includes(c)) return 0.6;
+    // Loose word-overlap check for cases like "Lucki" vs "Lucki Eck$".
+    const qWords = q.split(" ").filter(Boolean);
+    const overlap = qWords.filter((w) => c.includes(w)).length;
+    if (qWords.length && overlap === qWords.length) return 0.5;
+    return 0;
+  }
+
   function matchScore(queryArtist, queryTitle, candArtist, candTitle) {
-    const qa = normalize(queryArtist);
-    const qt = normalize(queryTitle);
-    const ca = normalize(candArtist);
-    const ct = normalize(candTitle);
-    if (!ca || !ct) return 0;
-
-    let score = 0;
-    if (ca === qa) score += 0.5;
-    else if (ca.includes(qa) || qa.includes(ca)) score += 0.3;
-
-    if (ct === qt) score += 0.5;
-    else if (ct.includes(qt) || qt.includes(ct)) score += 0.3;
-
-    return score;
+    const artistScore = componentScore(queryArtist, candArtist);
+    const titleScore = componentScore(queryTitle, candTitle);
+    if (artistScore < MIN_COMPONENT || titleScore < MIN_COMPONENT) return 0;
+    return artistScore + titleScore;
   }
 
   /** Look up artist / title / album / artwork via the iTunes Search API. */
@@ -99,7 +109,7 @@
       }
     }
 
-    if (bestScore < 0.3) {
+    if (bestScore <= 0) {
       throw new EchoTypeError(
         `No close match found for "${title}" by ${artist}. Double-check the spelling, or the track may not be in Apple's catalog.`,
         "NOT_FOUND"
@@ -148,7 +158,7 @@
         best = r;
       }
     }
-    if (!best || bestScore < 0.3) return null;
+    if (!best || bestScore <= 0) return null;
 
     let text = best.plainLyrics;
     if (!text && best.syncedLyrics) {
