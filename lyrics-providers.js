@@ -125,7 +125,67 @@
     };
   }
 
-  /** Primary lyrics source: lrclib.net (broad community coverage). */
+  /**
+   * Fetch as much of an artist's iTunes-catalog songs as the API returns.
+   * Note: this only covers tracks in Apple's official catalog — mixtapes,
+   * unreleased loosies, and SoundCloud-only drops won't show up here even
+   * if they exist elsewhere, because there's no "master list" this pulls
+   * from beyond what iTunes itself has indexed.
+   */
+  async function fetchArtistCatalog(artist) {
+    const term = encodeURIComponent(artist);
+    const url = `${ITUNES_ENDPOINT}?term=${term}&entity=song&attribute=artistTerm&limit=200`;
+
+    let res;
+    try {
+      res = await fetch(url);
+    } catch (e) {
+      throw new EchoTypeError(
+        "Couldn't reach the track database.",
+        "NETWORK"
+      );
+    }
+    if (!res.ok) {
+      throw new EchoTypeError("The track database didn't respond.", "NETWORK");
+    }
+
+    const data = await res.json();
+    if (!data.results || data.results.length === 0) {
+      throw new EchoTypeError(
+        `No catalog found for "${artist}" in Apple's music database.`,
+        "NOT_FOUND"
+      );
+    }
+
+    // Keep only results that are plausibly by this artist (guards against
+    // iTunes returning collaborators/features as loose matches), then
+    // dedupe same-named tracks (albums + deluxe editions repeat songs).
+    const qa = normalize(artist);
+    const seen = new Set();
+    const tracks = [];
+
+    for (const r of data.results) {
+      const ca = normalize(r.artistName);
+      if (!(ca === qa || ca.includes(qa) || qa.includes(ca))) continue;
+
+      const key = normalize(r.trackName);
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      tracks.push({
+        artist: r.artistName,
+        title: r.trackName,
+        album: r.collectionName,
+        artwork: upscaleArtwork(r.artworkUrl100),
+        releaseDate: r.releaseDate || null,
+      });
+    }
+
+    tracks.sort((a, b) => (a.releaseDate || "").localeCompare(b.releaseDate || ""));
+    return tracks;
+  }
+
+
   async function fetchLrclibLyrics(artist, title) {
     const url = `${LRCLIB_ENDPOINT}/search?artist_name=${encodeURIComponent(
       artist
@@ -274,5 +334,6 @@
     EchoTypeError,
     fetchTrackMetadata,
     fetchLyrics,
+    fetchArtistCatalog,
   };
 })();
