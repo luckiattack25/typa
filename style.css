@@ -237,7 +237,7 @@ body {
 }
 
 /* ---- loading state ---- */
-.loading-state {
+.loading-state:not([hidden]) {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -305,7 +305,7 @@ body {
 /* ============================================================
    Song view — asymmetric two-column stage
    ============================================================ */
-.song-view {
+.song-view:not([hidden]) {
   width: 100%;
   max-width: 1180px;
   display: grid;
