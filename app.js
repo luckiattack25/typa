@@ -3,7 +3,7 @@
  * typewriter playback engine (play/pause/restart/scrub/speed).
  */
 (function () {
-  const { fetchTrackMetadata, fetchLyrics, EchoTypeError } =
+  const { fetchTrackMetadata, fetchLyrics, fetchArtistCatalog, EchoTypeError } =
     window.EchoTypeProviders;
 
   // ---- DOM refs ----------------------------------------------------
@@ -11,6 +11,7 @@
   const artistInput = document.getElementById("artist-input");
   const songInput = document.getElementById("song-input");
   const findBtn = document.getElementById("find-btn");
+  const browseBtn = document.getElementById("browse-btn");
 
   const emptyState = document.getElementById("empty-state");
   const loadingState = document.getElementById("loading-state");
@@ -20,6 +21,9 @@
   const errorDetail = document.getElementById("error-detail");
   const errorRetry = document.getElementById("error-retry");
   const songView = document.getElementById("song-view");
+  const catalogState = document.getElementById("catalog-state");
+  const catalogArtistName = document.getElementById("catalog-artist-name");
+  const catalogList = document.getElementById("catalog-list");
 
   const artTilt = document.getElementById("art-tilt");
   const artImage = document.getElementById("art-image");
@@ -169,6 +173,7 @@
     loadingState.hidden = name !== "loading";
     errorState.hidden = name !== "error";
     songView.hidden = name !== "song";
+    catalogState.hidden = name !== "catalog";
   }
 
   function showError(title, detail) {
@@ -180,36 +185,112 @@
   let lastQuery = null;
 
   async function runSearch(artist, title) {
-    lastQuery = { artist, title };
+    lastQuery = { type: "search", artist, title };
     showState("loading");
     loadingText.textContent = `Looking up "${title}" by ${artist}…`;
     findBtn.disabled = true;
 
     try {
       const track = await fetchTrackMetadata(artist, title);
-
-      loadingText.textContent = "Finding the lyrics…";
-      const { lyrics, source } = await fetchLyrics(track.artist, track.title);
-
-      renderSong(track, lyrics, source);
+      await loadTrack(track);
       showState("song");
     } catch (err) {
-      if (err instanceof EchoTypeError) {
-        if (err.code === "NOT_FOUND") {
-          showError("Couldn't find that track", err.message);
-        } else if (err.code === "LYRICS_NOT_FOUND") {
-          showError("Lyrics not available", err.message);
-        } else {
-          showError("Network hiccup", err.message);
-        }
-      } else {
-        showError(
-          "Something unexpected happened",
-          "Please try again in a moment."
-        );
-      }
+      handleSearchError(err);
     } finally {
       findBtn.disabled = false;
+    }
+  }
+
+  /** Load lyrics for a track whose metadata is already known (used both
+   *  after a direct search and after picking an item from the catalog). */
+  async function loadTrack(track) {
+    loadingText.textContent = "Finding the lyrics…";
+    const { lyrics, source } = await fetchLyrics(track.artist, track.title);
+    renderSong(track, lyrics, source);
+  }
+
+  function handleSearchError(err) {
+    if (err instanceof EchoTypeError) {
+      if (err.code === "NOT_FOUND") {
+        showError("Couldn't find that track", err.message);
+      } else if (err.code === "LYRICS_NOT_FOUND") {
+        showError("Lyrics not available", err.message);
+      } else {
+        showError("Network hiccup", err.message);
+      }
+    } else {
+      showError(
+        "Something unexpected happened",
+        "Please try again in a moment."
+      );
+    }
+  }
+
+  async function browseArtist(artist) {
+    lastQuery = { type: "browse", artist };
+    showState("loading");
+    loadingText.textContent = `Pulling ${artist}'s catalog…`;
+    browseBtn.disabled = true;
+
+    try {
+      const tracks = await fetchArtistCatalog(artist);
+      renderCatalog(artist, tracks);
+      showState("catalog");
+    } catch (err) {
+      handleSearchError(err);
+    } finally {
+      browseBtn.disabled = false;
+    }
+  }
+
+  function renderCatalog(artist, tracks) {
+    catalogArtistName.textContent = artist;
+    catalogList.innerHTML = "";
+
+    for (const track of tracks) {
+      const li = document.createElement("li");
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "catalog-item";
+
+      const img = document.createElement("img");
+      img.className = "catalog-item-art";
+      img.src = track.artwork || "";
+      img.alt = "";
+      img.loading = "lazy";
+
+      const textWrap = document.createElement("span");
+      textWrap.className = "catalog-item-text";
+
+      const titleEl = document.createElement("span");
+      titleEl.className = "catalog-item-title";
+      titleEl.textContent = track.title;
+
+      const albumEl = document.createElement("span");
+      albumEl.className = "catalog-item-album";
+      albumEl.textContent = track.album || "";
+
+      textWrap.appendChild(titleEl);
+      textWrap.appendChild(document.createElement("br"));
+      textWrap.appendChild(albumEl);
+
+      btn.appendChild(img);
+      btn.appendChild(textWrap);
+      btn.addEventListener("click", () => selectCatalogTrack(track));
+
+      li.appendChild(btn);
+      catalogList.appendChild(li);
+    }
+  }
+
+  async function selectCatalogTrack(track) {
+    showState("loading");
+    loadingText.textContent = "Finding the lyrics…";
+    try {
+      await loadTrack(track);
+      showState("song");
+    } catch (err) {
+      handleSearchError(err);
     }
   }
 
@@ -241,7 +322,21 @@
   });
 
   errorRetry.addEventListener("click", () => {
-    if (lastQuery) runSearch(lastQuery.artist, lastQuery.title);
+    if (!lastQuery) return;
+    if (lastQuery.type === "browse") {
+      browseArtist(lastQuery.artist);
+    } else {
+      runSearch(lastQuery.artist, lastQuery.title);
+    }
+  });
+
+  browseBtn.addEventListener("click", () => {
+    const artist = artistInput.value.trim();
+    if (!artist) {
+      artistInput.focus();
+      return;
+    }
+    browseArtist(artist);
   });
 
   playBtn.addEventListener("click", () => {
