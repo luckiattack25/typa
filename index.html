@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
@@ -41,6 +41,7 @@
         </svg>
       </button>
     </form>
+    <button type="button" id="browse-btn" class="browse-btn">Browse artist's catalog</button>
   </header>
 
   <main id="main" class="stage">
@@ -64,6 +65,16 @@
       <h2 id="error-title" class="error-title">Something went wrong</h2>
       <p id="error-detail" class="error-detail"></p>
       <button id="error-retry" class="ghost-btn" type="button">Try again</button>
+    </section>
+
+    <!-- Catalog browse state -->
+    <section id="catalog-state" class="catalog-state" hidden>
+      <div class="catalog-header">
+        <p class="catalog-kicker">Apple's catalog for</p>
+        <h2 id="catalog-artist-name" class="catalog-artist-name"></h2>
+        <p class="catalog-note">Official releases only — mixtapes and unreleased tracks won't appear here.</p>
+      </div>
+      <ul id="catalog-list" class="catalog-list"></ul>
     </section>
 
     <!-- Loaded song view -->
@@ -131,9 +142,9 @@
 
 </div>
 
-<script src="rain.js"></script>
-<script src="tilt.js"></script>
-<script src="lyrics-providers.js"></script>
-<script src="app.js"></script>
+<script src="js/rain.js"></script>
+<script src="js/tilt.js"></script>
+<script src="js/lyrics-providers.js"></script>
+<script src="js/app.js"></script>
 </body>
 </html>
