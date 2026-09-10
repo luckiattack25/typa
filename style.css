@@ -196,6 +196,23 @@ body {
 .find-btn-icon { transition: transform 0.15s ease; }
 .find-btn:hover .find-btn-icon { transform: translateX(2px); }
 
+.browse-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  padding: 4px 2px;
+  align-self: flex-end;
+  flex-basis: 100%;
+  text-align: right;
+}
+
+.browse-btn:hover { color: var(--text-secondary); }
+
 /* ============================================================
    Stage — the main content region
    ============================================================ */
@@ -301,6 +318,108 @@ body {
   border-color: var(--signal);
   background: rgba(255, 159, 28, 0.08);
 }
+
+/* ---- catalog browse state ---- */
+.catalog-state:not([hidden]) {
+  width: 100%;
+  max-width: 720px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.catalog-header { text-align: left; }
+
+.catalog-kicker {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-tertiary);
+  margin: 0 0 6px;
+}
+
+.catalog-artist-name {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0 0 10px;
+}
+
+.catalog-note {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.catalog-list {
+  list-style: none;
+  margin: 0;
+  padding: 8px;
+  max-height: min(58vh, 560px);
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-radius: var(--radius-lg);
+}
+
+.catalog-list::-webkit-scrollbar { width: 8px; }
+.catalog-list::-webkit-scrollbar-thumb {
+  background: var(--panel-border);
+  border-radius: 4px;
+}
+
+.catalog-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.catalog-item:hover,
+.catalog-item:focus-visible {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.catalog-item-art {
+  width: 44px;
+  height: 44px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--panel-solid);
+}
+
+.catalog-item-text {
+  min-width: 0;
+}
+
+.catalog-item-title {
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.catalog-item-album {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 
 /* ============================================================
    Song view — asymmetric two-column stage
