@@ -2,10 +2,15 @@
  * All external data fetching lives here, isolated from UI/animation logic.
  *
  * - Track metadata + artwork: iTunes Search API (no key, CORS-open).
- * - Lyrics, primary: a Fandom lyrics wiki via the public MediaWiki API,
- *   using the documented `origin=*` parameter to enable CORS from a
- *   browser with no backend involved.
- * - Lyrics, fallback: lyrics.ovh (no key, CORS-open).
+ * - Lyrics, in order of preference:
+ *     1. lrclib.net — free, keyless, CORS-open, community-maintained lyrics
+ *        database used by several synced-lyrics music apps. Much better
+ *        coverage of underground/mixtape artists and newer releases than
+ *        the two sources below.
+ *     2. A Fandom lyrics wiki, via the public MediaWiki API, using the
+ *        documented `origin=*` parameter to enable CORS from a browser
+ *        with no backend involved.
+ *     3. lyrics.ovh — smaller, keyless, CORS-open fallback.
  *
  * Every function throws a small typed error the UI can present directly.
  */
@@ -20,16 +25,44 @@
   const ITUNES_ENDPOINT = "https://itunes.apple.com/search";
   const FANDOM_WIKI = "https://lyrics.fandom.com";
   const LYRICS_OVH = "https://api.lyrics.ovh/v1";
+  const LRCLIB_ENDPOINT = "https://lrclib.net/api";
 
   function upscaleArtwork(url) {
     if (!url) return null;
     return url.replace(/\d+x\d+bb\.(jpg|png)/, "600x600bb.$1");
   }
 
+  function normalize(str) {
+    return (str || "")
+      .toLowerCase()
+      .replace(/\(feat\.?[^)]*\)|\[feat\.?[^\]]*\]/g, "")
+      .replace(/feat\.?.*$/, "")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  }
+
+  /** How well two (artist, title) pairs match, 0 (no match) to 1 (perfect). */
+  function matchScore(queryArtist, queryTitle, candArtist, candTitle) {
+    const qa = normalize(queryArtist);
+    const qt = normalize(queryTitle);
+    const ca = normalize(candArtist);
+    const ct = normalize(candTitle);
+    if (!ca || !ct) return 0;
+
+    let score = 0;
+    if (ca === qa) score += 0.5;
+    else if (ca.includes(qa) || qa.includes(ca)) score += 0.3;
+
+    if (ct === qt) score += 0.5;
+    else if (ct.includes(qt) || qt.includes(ct)) score += 0.3;
+
+    return score;
+  }
+
   /** Look up artist / title / album / artwork via the iTunes Search API. */
   async function fetchTrackMetadata(artist, title) {
     const term = encodeURIComponent(`${artist} ${title}`);
-    const url = `${ITUNES_ENDPOINT}?term=${term}&entity=song&limit=5`;
+    const url = `${ITUNES_ENDPOINT}?term=${term}&entity=song&limit=15`;
 
     let res;
     try {
@@ -53,12 +86,25 @@
       );
     }
 
-    // Prefer the closest artist-name match among the returned results.
-    const lowerArtist = artist.trim().toLowerCase();
-    const best =
-      data.results.find(
-        (r) => (r.artistName || "").toLowerCase() === lowerArtist
-      ) || data.results[0];
+    // Score every candidate and take the best artist+title match, rather
+    // than trusting iTunes' own result ordering (which can surface remixes,
+    // covers, or same-titled tracks by other artists first).
+    let best = data.results[0];
+    let bestScore = -1;
+    for (const r of data.results) {
+      const s = matchScore(artist, title, r.artistName, r.trackName);
+      if (s > bestScore) {
+        bestScore = s;
+        best = r;
+      }
+    }
+
+    if (bestScore < 0.3) {
+      throw new EchoTypeError(
+        `No close match found for "${title}" by ${artist}. Double-check the spelling, or the track may not be in Apple's catalog.`,
+        "NOT_FOUND"
+      );
+    }
 
     return {
       artist: best.artistName,
@@ -67,6 +113,54 @@
       artwork: upscaleArtwork(best.artworkUrl100),
       previewUrl: best.previewUrl || null,
     };
+  }
+
+  /** Primary lyrics source: lrclib.net (broad community coverage). */
+  async function fetchLrclibLyrics(artist, title) {
+    const url = `${LRCLIB_ENDPOINT}/search?artist_name=${encodeURIComponent(
+      artist
+    )}&track_name=${encodeURIComponent(title)}`;
+
+    let res;
+    try {
+      res = await fetch(url);
+    } catch (e) {
+      return null;
+    }
+    if (!res.ok) return null;
+
+    let results;
+    try {
+      results = await res.json();
+    } catch (e) {
+      return null;
+    }
+    if (!Array.isArray(results) || results.length === 0) return null;
+
+    let best = null;
+    let bestScore = -1;
+    for (const r of results) {
+      const text = r.plainLyrics || r.syncedLyrics;
+      if (!text) continue;
+      const s = matchScore(artist, title, r.artistName, r.trackName);
+      if (s > bestScore) {
+        bestScore = s;
+        best = r;
+      }
+    }
+    if (!best || bestScore < 0.3) return null;
+
+    let text = best.plainLyrics;
+    if (!text && best.syncedLyrics) {
+      // Strip [mm:ss.xx] timestamps from LRC-format lyrics.
+      text = best.syncedLyrics
+        .split("\n")
+        .map((line) => line.replace(/^\[\d{2}:\d{2}(\.\d{2,3})?\]\s?/, ""))
+        .join("\n");
+    }
+    if (!text || text.trim().length < 20) return null;
+
+    return text.trim();
   }
 
   /**
@@ -81,7 +175,7 @@
     try {
       searchRes = await fetch(searchUrl);
     } catch (e) {
-      return null; // Fall through to the secondary provider silently.
+      return null;
     }
     if (!searchRes.ok) return null;
 
@@ -106,7 +200,7 @@
     if (!wikitext) return null;
 
     const cleaned = cleanWikitext(wikitext);
-    if (!cleaned || cleaned.length < 40) return null; // too short to be real lyrics
+    if (!cleaned || cleaned.length < 40) return null;
 
     return cleaned;
   }
@@ -114,26 +208,15 @@
   /** Strip MediaWiki markup down to plain lyric lines. */
   function cleanWikitext(wikitext) {
     let text = wikitext;
-
-    // Drop templates like {{...}}, infoboxes, categories, refs.
     text = text.replace(/\{\{[\s\S]*?\}\}/g, "");
     text = text.replace(/\[\[Category:[^\]]*\]\]/gi, "");
     text = text.replace(/<ref[\s\S]*?<\/ref>/gi, "");
     text = text.replace(/<[^>]+>/g, "");
-
-    // Convert [[link|Display]] or [[link]] to plain display text.
     text = text.replace(/\[\[([^\]|]*)\|([^\]]*)\]\]/g, "$2");
     text = text.replace(/\[\[([^\]]*)\]\]/g, "$1");
-
-    // Remove bold/italic wiki markup.
     text = text.replace(/'''''|'''|''/g, "");
-
-    // Drop remaining section headers like == Lyrics ==.
     text = text.replace(/^={2,}.*={2,}$/gm, "");
-
-    // Collapse excess blank lines.
     text = text.replace(/\n{3,}/g, "\n\n").trim();
-
     return text;
   }
 
@@ -157,10 +240,14 @@
   }
 
   /**
-   * Try Fandom first, then lyrics.ovh. Returns { lyrics, source }.
-   * Throws EchoTypeError("NOT_FOUND") if both come up empty.
+   * Try lrclib first, then Fandom, then lyrics.ovh.
+   * Returns { lyrics, source }. Throws EchoTypeError("LYRICS_NOT_FOUND")
+   * if all three come up empty.
    */
   async function fetchLyrics(artist, title) {
+    const lrclib = await fetchLrclibLyrics(artist, title);
+    if (lrclib) return { lyrics: lrclib, source: "lrclib.net" };
+
     const fandom = await fetchFandomLyrics(artist, title);
     if (fandom) return { lyrics: fandom, source: "Fandom" };
 
@@ -168,7 +255,7 @@
     if (ovh) return { lyrics: ovh, source: "lyrics.ovh" };
 
     throw new EchoTypeError(
-      `Found the track, but no lyrics were available for "${title}."`,
+      `Found the track, but no lyrics were available for "${title}" anywhere EchoType checked.`,
       "LYRICS_NOT_FOUND"
     );
   }
